@@ -82,11 +82,11 @@ class Entry(object):
 
 
 class Dir(Entry):
-    def __init__(self, path, name, state):
+    def __init__(self, path, name, state, options=None):
         Entry.__init__(self, path, name, state)
         self.isdir = 1
         self.rev = ""
-        self.options = ""
+        self.options = options
 
 
 class File(Entry):
