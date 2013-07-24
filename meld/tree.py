@@ -80,6 +80,7 @@ class DiffTreeStore(gtk.TreeStore):
             (del_fg, roman,  bold,   True),  # STATE_REMOVED
             (del_fg, roman,  bold,   True),  # STATE_MISSING
             (unk_fg, roman,  normal, True),  # STATE_NONEXIST
+            (mod_fg, roman,  bold,   None),  # STATE_RENAMED
         ]
 
         self.icon_details = [
@@ -96,6 +97,7 @@ class DiffTreeStore(gtk.TreeStore):
             ("text-x-generic", "folder", del_fg, None),    # REMOVED
             ("text-x-generic", "folder", unk_fg, unk_fg),  # MISSING
             ("text-x-generic", "folder", unk_fg, unk_fg),  # NONEXIST
+            ("text-x-generic", "folder", mod_fg, None),    # MODIFIED
         ]
 
         assert len(self.icon_details) == len(self.text_attributes) == STATE_MAX

@@ -31,11 +31,11 @@ from gettext import gettext as _
 # ignored, new, normal, ignored changes,
 # error, placeholder, vc added
 # vc modified, vc conflict, vc removed
-# locally removed, end
+# locally removed, renamed, end
 (STATE_IGNORED, STATE_NONE, STATE_NORMAL, STATE_NOCHANGE,
     STATE_ERROR, STATE_EMPTY, STATE_NEW,
     STATE_MODIFIED, STATE_CONFLICT, STATE_REMOVED,
-    STATE_MISSING, STATE_NONEXIST, STATE_MAX) = list(range(13))
+    STATE_MISSING, STATE_NONEXIST, STATE_RENAMED, STATE_MAX) = list(range(14))
 
 # VC conflict types
 (CONFLICT_MERGED, CONFLICT_BASE, CONFLICT_LOCAL,
@@ -59,7 +59,8 @@ def partition(pred, iterable):
 
 class Entry(object):
     # These are the possible states of files. Be sure to get the colons correct.
-    states = _("Ignored:Unversioned:::Error::Newly added:Modified:Conflict:Removed:Missing:Not present").split(":")
+    states = _("Ignored:Unversioned:::Error::Newly added:Modified:"
+               "Conflict:Removed:Missing:Not present:Renamed").split(":")
     states[STATE_CONFLICT] = "<b>%s</b>" % states[STATE_CONFLICT]
     assert len(states) == STATE_MAX
 
