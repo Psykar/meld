@@ -38,11 +38,14 @@ class Vc(_vc.CachedVc):
     CMDARGS = ["--no-aliases", "--no-plugins"]
     NAME = "Bazaar"
     VC_DIR = ".bzr"
+    PATCH_INDEX_RE = "^=== modified file '(.*)' (.*)$"
     CONFLICT_RE = "conflict in (.*)$"
-
+    RENAMED_RE = ".*=> (.*)$"
     commit_statuses = (
-        _vc.STATE_MODIFIED, _vc.STATE_NEW, _vc.STATE_REMOVED
+        _vc.STATE_MODIFIED, _vc.STATE_RENAMED, _vc.STATE_NEW, _vc.STATE_REMOVED
     )
+
+    VC_COLUMNS = (_vc.DATA_NAME, _vc.DATA_STATE, _vc.DATA_OPTIONS)
 
     conflict_map = {
         _vc.CONFLICT_BASE: '.BASE',
@@ -56,7 +59,7 @@ class Vc(_vc.CachedVc):
         " ": None,                # First status column empty
         "+": None,                # File versioned
         "-": None,                # File unversioned
-        "R": None,                # File renamed
+        "R": _vc.STATE_RENAMED,   # File renamed
         "?": _vc.STATE_NONE,      # File unknown
         "X": None,                # File nonexistent (and unknown to bzr)
         "C": _vc.STATE_CONFLICT,  # File has conflicts
@@ -67,12 +70,25 @@ class Vc(_vc.CachedVc):
         " ": _vc.STATE_NORMAL,    # Second status column empty
         "N": _vc.STATE_NEW,       # File created
         "D": _vc.STATE_REMOVED,   # File deleted
-        "K": None,                # File kind changed
+        "K": _vc.STATE_RENAMED,   # File kind changed
         "M": _vc.STATE_MODIFIED,  # File modified
     }
 
-    valid_status_re = r'[%s][%s][\*\s]\s*' % (''.join(state_1_map.keys()),
-                                              ''.join(state_2_map.keys()))
+    # BZR only tracks executable bit changes.
+    state_3_map = {
+        " ": None,  # Third status column empty
+        "*": _vc.STATE_MODIFIED,  # File x bit changed
+        "/": _vc.STATE_MODIFIED,  # Dir x bit changed # Can't test?
+        "@": _vc.STATE_MODIFIED,  # Symlink x bit changed # Impossible?
+    }
+
+    valid_status_re = r'[%s][%s][%s]\s*' % (''.join(state_1_map.keys()),
+                                            ''.join(state_2_map.keys()),
+                                            ''.join(state_3_map.keys()),)
+
+    def __init__(self, location):
+        super(Vc, self).__init__(location)
+        self._tree_meta_cache = {}
 
     def commit_command(self, message):
         return [self.CMD] + self.CMDARGS + ["commit", "-m", message]
@@ -127,64 +143,137 @@ class Vc(_vc.CachedVc):
                 files.append(os.path.relpath(p, self.root))
         return sorted(list(set(files)))
 
-    def _lookup_tree_cache(self, rootdir):
-        branch_root = _vc.popen(
-            [self.CMD] + self.CMDARGS + ["root", rootdir]).read().rstrip('\n')
+    def get_commits_to_push_summary(self):
+        """
+         Returns the output from bzr missing --mine-only
+
+         Could also check bzr missing --theirs-only - and return an error
+         if it gives results, as a merge would be required first.
+        """
+        # XXX Until we make this async we can't use this.
+        return ''
+        # proc = _vc.popen(
+        #     [self.CMD, "missing", '--mine-only', '--line'], cwd=self.location)
+        # return proc.readlines()[1]
+
+    def _get_modified_files(self, path):
+        # Get the status of files that have changed
+        proc = _vc.popen(
+            # Maybe add a -V
+            [self.CMD] + self.CMDARGS + ["status", "-S", "--no-pending", path],
+            cwd=self.location)
+        entries = proc.read().split("\n")[:-1]
+        entries = list(set(entries))
+
+        return entries
+
+    def _update_tree_state_cache(self, path, tree_state):
+        """ Update the state of the file(s) at tree_state['path'] """
         while 1:
             try:
-                proc = _vc.popen([self.CMD] + self.CMDARGS +
-                                 ["status", "-S", "--no-pending", branch_root])
-                entries = proc.read().split("\n")[:-1]
+                entries = self._get_modified_files(path)
                 break
             except OSError as e:
                 if e.errno != errno.EAGAIN:
                     raise
 
-        tree_state = {}
-        for entry in entries:
-            state_string, name = entry[:3], entry[4:].strip()
-            if not re.match(self.valid_status_re, state_string):
-                continue
-            # TODO: We don't do anything with exec bit changes.
-            state = self.state_1_map.get(state_string[0], None)
-            if state is None:
-                state = self.state_2_map.get(state_string[1], _vc.STATE_NORMAL)
-            elif state == _vc.STATE_CONFLICT:
-                real_path_match = re.search(self.CONFLICT_RE, name)
-                if real_path_match is None:
+        if len(entries) == 0 and os.path.isfile(path):
+            # If we're just updating a single file there's a chance that it
+            # was it was previously modified, and now has been edited
+            # so that it is un-modified.  This will result in an empty
+            # 'entries' list, and tree_state['path'] will still contain stale
+            # data.  When this corner case occurs we force tree_state['path']
+            # to STATE_NORMAL.
+            tree_state[path] = _vc.STATE_NORMAL
+        else:
+            branch_root = _vc.popen(
+                [self.CMD] + self.CMDARGS + ["root", self.location]
+            ).read().rstrip('\n')
+            for entry in entries:
+                state_string, name = entry[:3], entry[4:].strip()
+                meta = ''
+                if not re.match(self.valid_status_re, state_string):
                     continue
-                name = real_path_match.group(1)
+                state = self.state_1_map.get(state_string[0], None)
+                if state is None:
+                    state = self.state_2_map.get(
+                        state_string[1], _vc.STATE_NORMAL)
 
-            path = os.path.join(branch_root, name)
-            tree_state[path] = state
+                # Renamed and conflicts need some extra processing.
+                if state == _vc.STATE_RENAMED:
+                    # Need to do some more matching to get the new filename
+                    real_path_match = re.search(self.RENAMED_RE, name)
+                    if real_path_match is None:
+                        continue
+                    meta += name
+                    # If this was renamed to a directory, strip the slash.
+                    name = real_path_match.group(1).strip('/')
+                elif state == _vc.STATE_CONFLICT:
+                    real_path_match = re.search(self.CONFLICT_RE, name)
+                    if real_path_match is None:
+                        continue
+                    name = real_path_match.group(1)
 
+                path = os.path.join(branch_root, name)
+
+                executable_change = self.state_3_map.get(state_string[2], None)
+                if executable_change is not None:
+                    if state is _vc.STATE_NORMAL:
+                        state = executable_change
+                    # Find current executable status changes by diffing the file
+                    line = _vc.popen(['bzr', 'diff', path]).readline()
+                    executable_match = re.search(self.PATCH_INDEX_RE, line)
+                    if executable_match:
+                        meta += executable_match.group(2)
+
+                if meta:
+                    self._tree_meta_cache[path] = meta
+
+                if path in tree_state:
+                    # XXX What to do here?
+                    # Should we ensure more important states are higher #?
+                    # Or just list which ones shouldn't be overridden?
+                    # This occurs because some files can be listed twice in 
+                    # the status (conflicted and modified for eg)
+                    if state > tree_state[path]:
+                        tree_state[path] = state
+                else:
+                    tree_state[path] = state
+
+    def _lookup_tree_cache(self, rootdir):
+        # Get a list of all files in rootdir, as well as their status
+        tree_state = {}
+        # XXX This is odd. But if we create the cache on rootdir, the parent
+        # assumes the cache contains everything, so we have to create it on
+        # ./ instead.
+        self._update_tree_state_cache('./', tree_state)
         return tree_state
 
+    def update_file_state(self, path):
+        tree_state = self._get_tree_cache(os.path.dirname(path))
+        self._update_tree_state_cache(path, tree_state)
+
     def _get_dirsandfiles(self, directory, dirs, files):
+
         tree = self._get_tree_cache(directory)
 
         retfiles = []
         retdirs = []
-        bzrfiles = {}
+        for name, path in files:
+            state = tree.get(path, _vc.STATE_NORMAL)
+            meta = self._tree_meta_cache.get(path, "")
+            retfiles.append(_vc.File(path, name, state, options=meta))
+        for name, path in dirs:
+            # BZR can operate on directories.
+            state = tree.get(path, _vc.STATE_NORMAL)
+            meta = self._tree_meta_cache.get(path, "")
+            retdirs.append(_vc.Dir(path, name, state, options=meta))
         for path, state in tree.items():
-            mydir, name = os.path.split(path)
-            if path.endswith('/'):
-                mydir, name = os.path.split(mydir)
-            if mydir != directory:
-                continue
-            if path.endswith('/'):
-                retdirs.append(_vc.Dir(path[:-1], name, state))
-            else:
-                retfiles.append(_vc.File(path, name, state))
-            bzrfiles[name] = 1
-        for f, path in files:
-            if f not in bzrfiles:
-                state = _vc.STATE_NORMAL
-                retfiles.append(_vc.File(path, f, state))
-        for d, path in dirs:
-            if d not in bzrfiles:
-                state = _vc.STATE_NORMAL
-                retdirs.append(_vc.Dir(path, d, state))
+            # removed files are not in the filesystem, so must be added here
+            if state in (_vc.STATE_REMOVED, _vc.STATE_MISSING):
+                folder, name = os.path.split(path)
+                if folder == directory:
+                    retfiles.append(_vc.File(path, name, state))
         return retdirs, retfiles
 
     def get_path_for_repo_file(self, path, commit=None):

@@ -404,6 +404,10 @@ class VcView(melddoc.MeldDoc, gnomeglade.Component):
 
                     if flattened:
                         todo.append(((0,), e.path))
+                        # If the directory is changed, render it in flattened mode.
+                        if e.state != tree.STATE_NORMAL:
+                            child = self.model.add_entries(it, [e.path])
+                            self._update_item_state(child, e, path[prefixlen:])
                         continue
 
                 child = self.model.add_entries(it, [e.path])
