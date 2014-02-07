@@ -81,6 +81,7 @@ class DiffTreeStore(Gtk.TreeStore):
             (unk_fg, italic, normal, None),  # STATE_EMPTY
             (new_fg, roman,  bold,   None),  # STATE_NEW
             (mod_fg, roman,  bold,   None),  # STATE_MODIFIED
+            (mod_fg, roman,  normal, None),  # STATE_RENAMED
             (con_fg, roman,  bold,   None),  # STATE_CONFLICT
             (del_fg, roman,  bold,   True),  # STATE_REMOVED
             (del_fg, roman,  bold,   True),  # STATE_MISSING
@@ -97,6 +98,7 @@ class DiffTreeStore(Gtk.TreeStore):
             (None,             None    , None,   None),    # EMPTY
             ("text-x-generic", "folder", new_fg, None),    # NEW
             ("text-x-generic", "folder", mod_fg, None),    # MODIFIED
+            ("text-x-generic", "folder", mod_fg, None),   # RENAMED
             ("text-x-generic", "folder", con_fg, None),    # CONFLICT
             ("text-x-generic", "folder", del_fg, None),    # REMOVED
             ("text-x-generic", "folder", unk_fg, unk_fg),  # MISSING
@@ -113,6 +115,10 @@ class DiffTreeStore(Gtk.TreeStore):
         if path is not None:
             path = path.decode('utf8')
         return path
+
+    def is_folder(self, it, pane):
+        icon = self.get_value(it, self.column_index(COL_ICON, pane))
+        return icon == "folder"
 
     def column_index(self, col, pane):
         return self.ntree * col + pane

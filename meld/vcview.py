@@ -454,6 +454,11 @@ class VcView(melddoc.MeldDoc, gnomeglade.Component):
 
                     if flattened:
                         if e.state != tree.STATE_IGNORED:
+                            # If directory state is changed, render it in
+                            # in flattened mode.
+                            if e.state != tree.STATE_NORMAL:
+                                child = self.model.add_entries(it, [e.path])
+                                self._update_item_state(child, e, path[prefixlen:])
                             todo.append((Gtk.TreePath.new_first(), e.path))
                         continue
 
@@ -491,7 +496,8 @@ class VcView(melddoc.MeldDoc, gnomeglade.Component):
                 self.treeview.expand_row(path, False)
         else:
             path = self.model.value_path(it, 0)
-            self.run_diff(path)
+            if not self.model.is_folder(it, 0):
+                self.run_diff(path)
 
     def run_diff(self, path):
         if os.path.isdir(path):
