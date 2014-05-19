@@ -116,9 +116,10 @@ class DiffTreeStore(Gtk.TreeStore):
             path = path.decode('utf8')
         return path
 
-    def is_folder(self, it, pane):
+    def is_folder(self, it, pane, path):
+        # Given folder may have been removed, check the icon type.
         icon = self.get_value(it, self.column_index(COL_ICON, pane))
-        return icon == "folder"
+        return icon == "folder" or os.path.isdir(path)
 
     def column_index(self, col, pane):
         return self.ntree * col + pane

@@ -1,3 +1,4 @@
+# coding=utf-8
 ### Copyright (C) 2002-2005 Stephen Kennedy <stevek@gnome.org>
 ### Copyright (C) 2005 Aaron Bentley <aaron.bentley@utoronto.ca>
 
@@ -41,7 +42,8 @@ class Vc(_vc.CachedVc):
     VC_DIR = ".bzr"
     PATCH_INDEX_RE = "^=== modified file '(.*)' (.*)$"
     CONFLICT_RE = "conflict in (.*)$"
-    RENAMED_RE = "^(.*) => (.*)$"
+    #RENAMED_RE = u"^(.*) ⇒ (.*)$"
+    RENAMED_RE = u"^(.*) => (.*)$"
 
 
     commit_statuses = (
@@ -163,6 +165,7 @@ class Vc(_vc.CachedVc):
         self._tree_cache = tree_cache = defaultdict(set)
         self._tree_meta_cache = tree_meta_cache = defaultdict(list)
         self._rename_cache = rename_cache = {}
+        self._reverse_rename_cache = {}
         # Files can appear twice in the list if they conflict and were renamed
         # at once.
         for entry in entries:
@@ -214,6 +217,7 @@ class Vc(_vc.CachedVc):
                 tree_meta_cache[new].extend(tree_meta_cache[old])
                 del tree_cache[old]
                 del tree_meta_cache[old]
+            self._reverse_rename_cache[new] = old
 
         tree_cache = dict((x, max(y)) for x,y in tree_cache.items())
         return tree_cache
@@ -271,6 +275,9 @@ class Vc(_vc.CachedVc):
         return f.name
 
     def get_path_for_conflict(self, path, conflict):
+        if path in self._reverse_rename_cache and not \
+                conflict == _vc.CONFLICT_MERGED:
+            path = self._reverse_rename_cache[path]
         if not path.startswith(self.root + os.path.sep):
             raise _vc.InvalidVCPath(self, path, "Path not in repository")
 

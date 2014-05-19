@@ -437,7 +437,7 @@ class VcView(melddoc.MeldDoc, gnomeglade.Component):
             entries = self.vc.listdir(path)
             entries = [e for e in entries if any(f(e) for f in filters)]
             for e in entries:
-                if e.isdir:
+                if e.isdir and e.state != tree.STATE_REMOVED:
                     try:
                         st = os.lstat(e.path)
                     # Covers certain unreadable symlink cases; see bgo#585895
@@ -496,7 +496,7 @@ class VcView(melddoc.MeldDoc, gnomeglade.Component):
                 self.treeview.expand_row(path, False)
         else:
             path = self.model.value_path(it, 0)
-            if not self.model.is_folder(it, 0):
+            if not self.model.is_folder(it, 0, path):
                 self.run_diff(path)
 
     def run_diff(self, path):
@@ -511,7 +511,9 @@ class VcView(melddoc.MeldDoc, gnomeglade.Component):
             'prompt_resolve': False,
         }
 
-        if self.vc.get_entry(path).state == tree.STATE_CONFLICT and \
+        # May have removed directories in list.
+        vc_entry = self.vc.get_entry(path)
+        if vc_entry and vc_entry.state == tree.STATE_CONFLICT and \
                 hasattr(self.vc, 'get_path_for_conflict'):
             local_label = _(u"%s — local") % basename
             remote_label = _(u"%s — remote") % basename
